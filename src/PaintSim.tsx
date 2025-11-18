@@ -9,8 +9,6 @@ import {
     triangulateLoopUV
 } from './intersection'
 import {
-    blurMatX,
-    blurMatY,
     blurVert,
     fbmFrag,
 } from './ShaderCode'
@@ -33,7 +31,6 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
     // Mask + blur intermediates
     const maskFBO = useFBO(FBO_SIZE, FBO_SIZE, { depthBuffer: false, stencilBuffer: false, type: THREE.FloatType })
     const blurA   = useFBO(FBO_SIZE, FBO_SIZE, { depthBuffer: false, stencilBuffer: false, type: THREE.FloatType })
-    const blurB   = useFBO(FBO_SIZE, FBO_SIZE, { depthBuffer: false, stencilBuffer: false, type: THREE.FloatType })
 
     // Fullscreen infra
     const ortho = useMemo(() => new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), [])
@@ -50,10 +47,7 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
             uAbs:   { value: 1.0 },
             uDry:   { value: 0.96 }
         },
-        vertexShader: /* glsl */`
-            varying vec2 vUv;
-            void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`
-        ,
+        vertexShader: blurVert,
         fragmentShader: /* glsl */`
             uniform sampler2D uPrev;
             uniform sampler2D uMask;
@@ -158,18 +152,18 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
     const maskMeshRef = useRef<THREE.Mesh | null>(null)
 
     useEffect(() => {
-            const geom = new THREE.BufferGeometry()
-            geom.setAttribute('uvPos', new THREE.BufferAttribute(new Float32Array(0), 2))
-            geom.setIndex(new THREE.BufferAttribute(new Uint32Array(0), 1))
-            const m = new THREE.Mesh(geom, maskMaterial)
-            m.frustumCulled = false
-            maskScene.add(m)
-            maskMeshRef.current = m
-            return () => {
+        const geom = new THREE.BufferGeometry()
+        geom.setAttribute('uvPos', new THREE.BufferAttribute(new Float32Array(0), 2))
+        geom.setIndex(new THREE.BufferAttribute(new Uint32Array(0), 1))
+        const m = new THREE.Mesh(geom, maskMaterial)
+        m.frustumCulled = false
+        maskScene.add(m)
+        maskMeshRef.current = m
+        return () => {
             maskScene.remove(m)
             geom.dispose()
             m.geometry.dispose()
-            }
+        }
     }, [maskMaterial, maskScene])
 
     const ping = useRef(true)
@@ -203,45 +197,36 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
         const elapsed = state.clock.getElapsedTime();
         fbmMat.uniforms.t.value = elapsed * 30; // or scale it if needed
 
-        const distToPlane = Math.abs(brush.position.y)
-        const shouldPaint = distToPlane < 0.7
-
         let hadGeometry = false
-        if (shouldPaint) {
-            brush.updateWorldMatrix(true, false)
-            const world = brush.matrixWorld.clone()
-            const geom = brush.geometry
-            const segs = intersectGeometryWithPlaneY0(world, geom)
-            const loopsXZ = buildLoops(segs)
-            const uvLoops: THREE.Vector2[][] = loopsXZ.map(loop => loop.map(p => uvFromXZ(p, planeSize)))
+        brush.updateWorldMatrix(true, false)
+        const world = brush.matrixWorld.clone()
+        const geom = brush.geometry
+        const segs = intersectGeometryWithPlaneY0(world, geom)
+        const loopsXZ = buildLoops(segs)
+        const uvLoops: THREE.Vector2[][] = loopsXZ.map(loop => loop.map(p => uvFromXZ(p, planeSize)))
 
-            let totalVerts = 0, totalInds = 0
-            const parts = uvLoops.map(loop => {
-                const { positions, indices } = triangulateLoopUV(loop)
-                totalVerts += positions.length / 2
-                totalInds  += indices.length
-                return { positions, indices }
-            })
-            const pos = new Float32Array(totalVerts * 2)
-            const ind = new Uint32Array(totalInds)
-            let vOfs = 0, iOfs = 0
-            parts.forEach(({ positions, indices }) => {
-                pos.set(positions, vOfs * 2)
-                for (let i = 0; i < indices.length; i++) ind[iOfs + i] = indices[i] + vOfs
-                vOfs += positions.length / 2
-                iOfs += indices.length
-            })
+        let totalVerts = 0, totalInds = 0
+        const parts = uvLoops.map(loop => {
+            const { positions, indices } = triangulateLoopUV(loop)
+            totalVerts += positions.length / 2
+            totalInds  += indices.length
+            return { positions, indices }
+        })
+        const pos = new Float32Array(totalVerts * 2)
+        const ind = new Uint32Array(totalInds)
+        let vOfs = 0, iOfs = 0
+        parts.forEach(({ positions, indices }) => {
+            pos.set(positions, vOfs * 2)
+            for (let i = 0; i < indices.length; i++) ind[iOfs + i] = indices[i] + vOfs
+            vOfs += positions.length / 2
+            iOfs += indices.length
+        })
 
-            const g = maskMeshRef.current!.geometry
-            g.setAttribute('uvPos', new THREE.BufferAttribute(pos, 2))
-            g.setIndex(new THREE.BufferAttribute(ind, 1))
-            g.computeBoundingSphere()
-            hadGeometry = totalInds > 0
-        } else {
-            const g = maskMeshRef.current!.geometry
-            g.setAttribute('uvPos', new THREE.BufferAttribute(new Float32Array(0), 2))
-            g.setIndex(new THREE.BufferAttribute(new Uint32Array(0), 1))
-        }
+        const g = maskMeshRef.current!.geometry
+        g.setAttribute('uvPos', new THREE.BufferAttribute(pos, 2))
+        g.setIndex(new THREE.BufferAttribute(ind, 1))
+        g.computeBoundingSphere()
+        hadGeometry = totalInds > 0
 
         // (3) draw binary mask
         gl.setRenderTarget(maskFBO)
@@ -249,21 +234,9 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
         gl.clear(true, true, true)
         if (hadGeometry) gl.render(maskScene, maskCamera)
 
-        // (3.5) blur X: maskFBO -> blurA
-        quadMesh.material = blurMatX
-        blurMatX.uniforms.uTex.value = maskFBO.texture
-        gl.setRenderTarget(blurA)
-        gl.render(quadScene, ortho)
-
-        // (3.6) blur Y: blurA -> blurB
-        quadMesh.material = blurMatY
-        blurMatY.uniforms.uTex.value = blurA.texture
-        gl.setRenderTarget(blurB)
-        gl.render(quadScene, ortho)
-
-        // // (3.7) fBM mask: blurB -> blurA  (final fBM-masked float in R)
+        // // (3.7) fBM mask: (final fBM-masked float in R)
         quadMesh.material = fbmMat;
-        fbmMat.uniforms.uTex.value = blurB.texture;
+        fbmMat.uniforms.uTex.value = maskFBO.texture;
         gl.setRenderTarget(blurA);
         gl.render(quadScene, ortho);
 

@@ -18,6 +18,7 @@ const BrushMesh = forwardRef<THREE.Mesh, Props>(({ groupRef }, ref) => {
         position={[0, 0, 0]} 
         castShadow 
         geometry={nodes.duck.geometry}
+        scale={[2, 2, 2]}
       >
         <meshStandardMaterial
           color="#ffffff"
@@ -30,12 +31,13 @@ const BrushMesh = forwardRef<THREE.Mesh, Props>(({ groupRef }, ref) => {
         />
       </mesh>
 
-      <mesh 
+      {/* <mesh 
         position={[0, 0, 0]} 
         castShadow
         geometry={nodes.duck.geometry}
         material={nodes.duck.material}
-      ></mesh>
+        scale={[2, 2, 2]}
+      ></mesh> */}
     </group>
   );
 });
