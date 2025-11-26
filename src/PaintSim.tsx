@@ -21,7 +21,7 @@ type Props = {
 }
 
 export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef }: Props) {
-    const { gl } = useThree()
+    const { gl } = useThree();
     const FBO_SIZE = 1024
 
     // Accumulator ping-pong
@@ -80,41 +80,14 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
                 vec3 prev = texture2D(uPrev, vUv).rgb * uDry;
                 vec3 maskSample = texture2D(uMask, vUv).rgb;
 
-                float m = maskSample.r;
-
                 // plain paint contribution
-                vec3 paint = vec3(1.0) * (m * uWet);
+                // vec3 paint = vec3(1.0) * (maskSample * uWet);
 
                 // outc = your “wet paint buffer” result
-                vec3 outc = mix(prev, paint, uAbs * m * uAlpha) +
-                            (1.0 - uAbs) * paint * uAlpha;
+                // vec3 outc = mix(prev, paint, uAbs * maskSample * uAlpha) +
+                //             (1.0 - uAbs) * paint * uAlpha;
 
-                // --- EMISSION BASED ON MASK / RAMP ---
-                vec3 blue = vec3(0.454, 0.893, 1.0);
-
-                // you can also try using outc.r here instead of m if you want emission from paint intensity
-                float subtract    = outc.r;
-                float add_result  = maskSample.g; // texture2D(uMask, vUv).y
-
-                float surface_tone = clamp(
-                    pow(colorRamp(add_result) * 9.07, 2.6),
-                    0.0,
-                    1.0
-                );
-
-                vec3 emissionColor = mix(vec3(0.0), blue, surface_tone);
-
-                float emissionStrength = pow(m * 10.0, 13.37) + 0.2;
-
-                vec3 emission = emissionColor * emissionStrength;
-
-                // --- COMBINE PAINT + EMISSION ---
-                vec3 finalColor = outc + emission;
-
-                // keep it in visible range
-                finalColor = clamp(finalColor, 0.0, 1.0);
-
-                gl_FragColor = vec4(finalColor, 1.0);
+                gl_FragColor = vec4(maskSample, 1.0);
             }
         `,
         depthTest: false,
@@ -173,21 +146,30 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
     const GAIN = 0.8;
 
 
-    const fbmMat = new THREE.ShaderMaterial({
-        uniforms: {
-            uTex:         { value: null as THREE.Texture | null },
-            uScale:       { value: 8 },
-            uOctaves:     { value: OCTAVES },
-            uGain:        { value: GAIN },
-            uLacunarity:  { value: 2.0 },
-            uNormalize:   { value: 1. },
-            t:            { value: 0.0 },
-        },
-        vertexShader: blurVert,
-        fragmentShader: fbmFrag,
-        depthTest: false,
-        depthWrite: false
-    });
+    const fbmMat = useMemo(
+        () =>
+        new THREE.ShaderMaterial({
+            uniforms: {
+            uTex:        { value: null },
+            uScale:      { value: 8 },
+            uOctaves:    { value: OCTAVES },
+            uGain:       { value: GAIN },
+            uLacunarity: { value: 2.0 },
+            uNormFactor: { value: 1.0 },
+            t:           { value: 0.0 },
+
+            // NEW:
+            uCameraPos:  { value: new THREE.Vector3() },
+            uPlaneSize:  { value: new THREE.Vector2(planeSize.width, planeSize.height) },
+            },
+            vertexShader: blurVert,
+            fragmentShader: fbmFrag,
+            depthTest: false,
+            depthWrite: false,
+        }),
+        [planeSize.width, planeSize.height]
+    );
+
 
     useFrame((state) => {
         const brush = brushRef.current
@@ -196,6 +178,9 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
 
         const elapsed = state.clock.getElapsedTime();
         fbmMat.uniforms.t.value = elapsed * 30; // or scale it if needed
+
+        // update camera-based uniform every frame (OrbitControls modifies state.camera)
+        fbmMat.uniforms.uCameraPos.value.copy(state.camera.position);
 
         let hadGeometry = false
         brush.updateWorldMatrix(true, false)

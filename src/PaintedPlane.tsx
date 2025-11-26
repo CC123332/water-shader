@@ -35,7 +35,7 @@ export default function PaintedPlane({ planeSize, paintTexRef }: Props) {
   mat.uniforms.uPaint.value = paintTexRef.current
 
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0,0,0]}>
       <planeGeometry args={[planeSize.width, planeSize.height, 1, 1]} />
       <primitive object={mat} attach="material" />
     </mesh>

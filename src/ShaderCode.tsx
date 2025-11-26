@@ -1,7 +1,3 @@
-import * as THREE from 'three'
-
-// --- fBM pass (reads blurred mask -> writes fBM-masked float into a new target) ---
-
 export const fbmFrag = /* glsl */`
     precision highp float;
 
@@ -14,6 +10,10 @@ export const fbmFrag = /* glsl */`
     uniform float uLacunarity;
     uniform float uNormFactor;
     uniform float t;           // time variable [0,300]
+
+    // NEW:
+    uniform vec3 uCameraPos;   // orbit camera position in world space
+    uniform vec2 uPlaneSize;   // water plane size in world units (width, height)
 
     // 3D hash → scalar in [0,1)
     float random3D(vec3 p) {
@@ -91,9 +91,51 @@ export const fbmFrag = /* glsl */`
 
     float colorRamp(float t){
         // Key stops
+        float black = 0.072727;
+        float white  = 0.177273;
+        float color = 1.0;
+
+        if (t <= black) {
+            color = 0.0; // solid black
+        }
+        else if (t <= white) {
+            // Linear interpolation: black → white
+            float f = (t - black) / (white - black);
+            color = mix(0.0, 1.0, f);
+        }
+        else {
+            color = 1.0; // solid white again
+        }
+
+        return color;
+    }
+
+    float colorRamp2(float t){
+        // Key stops
+        float black = 0.131818;
+        float white  = 0.595455;
+        float color = 1.0;
+
+        if (t <= black) {
+            color = 0.0; // solid black
+        }
+        else if (t <= white) {
+            // Linear interpolation: black → white
+            float f = (t - black) / (white - black);
+            color = mix(0.0, 1.0, f);
+        }
+        else {
+            color = 1.0; // solid white again
+        }
+
+        return color;
+    }
+
+    float colorRamp3(float t){
+        // Key stops
         float black1 = 0.545;
         float white  = 0.777;
-        float black2 = 0.932;
+        float black2  = 0.931;
         float color = 0.0;
 
         if (t <= black1) {
@@ -107,17 +149,16 @@ export const fbmFrag = /* glsl */`
         else if (t <= black2) {
             // Linear interpolation: white → black
             float f = (t - white) / (black2 - white);
-            color = mix(1.0, 0.0, f);
+            color = mix(0.0, 1.0, f);
         }
         else {
-            color = 0.0; // solid black again
+            color = 0.0; // solid white again
         }
 
         return color;
     }
 
     vec3 linearLight(vec3 a, vec3 b, float factor) {
-        factor = clamp(factor, 0.0, 1.0);
         vec3 blend = b + 2.0 * a - 1.0;
         return mix(b, blend, factor);
     }
@@ -138,7 +179,10 @@ export const fbmFrag = /* glsl */`
     // Inigo Quilez-style smooth min for distances
     float smin(float a, float b, float k) {
         // k is the smoothing radius (in distance units)
-        float h = clamp(0.5 + 0.5*(b - a)/k, 0.0, 1.0);
+        float h = 0.5 + 0.5*(b - a)/k;
+        if(h > 1.){
+            h = 0.999;
+        }
         return mix(b, a, h) - k*h*(1.0 - h);
     }
 
@@ -173,14 +217,48 @@ export const fbmFrag = /* glsl */`
         }
 
         // Map 0..1 smoothness to a smoothing radius in cell-space
-        float k = mix(0.0, 0.6, clamp(smoothness, 0.0, 1.0));
+        float k = mix(0.0, 0.6, smoothness);
 
         // Classic F1 when smoothness == 0, otherwise smooth min of F1/F2
         return (k <= 0.0) ? d1 : smin(d1, d2, k);
     }
 
+    vec3 overlay(vec3 A, vec3 B) {
+
+        vec3 result;
+        for (int i = 0; i < 3; i++) {
+            float a = A[i];
+            float b = B[i];
+
+            result[i] = (a < 0.5)
+                ? (2.0 * a * b)
+                : (1.0 - 2.0 * (1.0 - a) * (1.0 - b));
+        }
+
+        return result;
+    }
+
 
     void main(){
+        // World-space position of the current water-surface point.
+        // Assuming the pool is centered at (0,0,0) on Y=0.
+        vec3 worldPos = vec3(
+            (vUv.x - 0.5) * uPlaneSize.x,
+            0.0,
+            (vUv.y - 0.5) * uPlaneSize.y
+        );
+
+        // Blender Geometry → Incoming:
+        // direction from surface point *towards* camera.
+        vec3 incoming = normalize(uCameraPos - worldPos);
+        //Riverbed Depth
+        float bedDepth = 1.;
+        vec3 viewDir = -incoming;
+        float denom = max(viewDir.y, 0.1);
+        vec2 parallaxOffset = (viewDir.xz / denom) * bedDepth;
+        vec3 riverbed_depth = vec3(parallaxOffset.x, 0.0, parallaxOffset.y);
+
+
         //Format UV
         vec3 formatted_UV = vec3(vUv.x * 25., vUv.y * 25., 0.);
 
@@ -208,17 +286,58 @@ export const fbmFrag = /* glsl */`
 
         //Voronoi
         float worleyOutput1 = voronoiSmoothF1(linear_2, vec3(.5), 0., 1.0);
-        float worleyOutput2 = voronoiSmoothF1(linear_2, vec3(.5), 0.55, 1.0);
+        float worleyOutput2 = voronoiSmoothF1(linear_2, vec3(.5), 0.56, 1.0);
         float subtract = worleyOutput1 - worleyOutput2;
 
         //Add
-        float Add = subtract + 0.717 * clamp(colorRamp(FMB_noise.r) * color_input.r, 0.0, 1.0);
+        float add_result = subtract + 0.717 * colorRamp3(FMB_noise.r) * color_input.r;
 
-        gl_FragColor = vec4(subtract, Add, 0., 1.0);
+
+
+        // Caustics Distortion
+        float caustics_distortion_timeFactor = mod(t, 300.0) / 180.0;
+        vec3 caustics_distortion_mapping = vec3(caustics_distortion_timeFactor, 0., 0.) + formatted_UV;
+        vec3 caustics_distortion_noise = fbm(caustics_distortion_mapping, 1., 2.59, 1.);
+
+        // Caustics Movement
+        float caustics_movement_timeFactor1 = mod(t, 300.0) / 400.0;
+        float caustics_movement_timeFactor2 = mod(t, 300.0) / 500.0;
+        vec3 caustics_movement_vec = vec3(caustics_movement_timeFactor1, 0., caustics_movement_timeFactor2);
+        vec3 caustics_movement_mapping = caustics_movement_vec + 0.026 * linearLight(linear_2, (linear + formatted_UV), 0.525) + riverbed_depth * 0.1;
+
+        // Caustics Distortion Amount
+        vec3 linear_3 = linearLight(caustics_distortion_noise, caustics_movement_mapping, 0.053);
+
+        // Caustics Shape
+        float caustics_shape_worleyOutput1 = voronoiSmoothF1(linear_3, vec3(6.), 0., 1.0);
+        float caustics_shape_worleyOutput2 = voronoiSmoothF1(linear_3, vec3(6.), 0.619, 1.0);
+        float caustics_shape_subtract = caustics_shape_worleyOutput1 - caustics_shape_worleyOutput2;
+        float caustics_shape_color_ramp = colorRamp2(caustics_shape_subtract);
+        vec3 blue2 = vec3(0.24824, 0.8, 0.8);
+        vec3 caustics_shape_output = mix(vec3(0.), blue2, caustics_shape_subtract);
+
+
+
+
+        // --- EMISSION BASED ON MASK / RAMP ---
+        vec3 blue = vec3(0.454, 0.893, 1.0);
+
+        float surface_tone = pow(colorRamp(add_result) * 9.07, 2.6);
+
+        vec3 emissionColor = mix(caustics_shape_output, blue, surface_tone);
+
+        float emissionStrength = pow(subtract * 10.93, 13.37) + 1.5;
+
+        gl_FragColor = vec4(emissionColor, 1.0);
     }
 `;
 
 // Separable blur shaders
 export const blurVert = /* glsl */`
-    varying vec2 vUv;
-    void main(){ vUv = uv; gl_Position = vec4(position, 1.0); }`
+// blurVert.glsl
+varying vec2 vUv;
+
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position, 1.0);  // fullscreen quad
+}`
