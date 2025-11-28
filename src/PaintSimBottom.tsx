@@ -10,7 +10,7 @@ import {
 } from './intersection'
 import {
     blurVert,
-    fbmFrag,
+    fbmFrag2,
 } from './ShaderCode'
 
 type Props = {
@@ -20,7 +20,7 @@ type Props = {
     groupRef: React.RefObject<THREE.Group | null>
 }
 
-export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef }: Props) {
+export default function PaintSimBottom({ planeSize, brushRef, outTextureRef, groupRef }: Props) {
     const { gl } = useThree();
     const FBO_SIZE = 1024
 
@@ -150,20 +150,16 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
         () =>
         new THREE.ShaderMaterial({
             uniforms: {
-            uTex:        { value: null },
-            uScale:      { value: 8 },
-            uOctaves:    { value: OCTAVES },
-            uGain:       { value: GAIN },
-            uLacunarity: { value: 2.0 },
-            uNormFactor: { value: 1.0 },
-            t:           { value: 0.0 },
-
-            // NEW:
-            uCameraPos:  { value: new THREE.Vector3() },
-            uPlaneSize:  { value: new THREE.Vector2(planeSize.width, planeSize.height) },
+                uTex:        { value: null },
+                uScale:      { value: 8 },
+                uOctaves:    { value: OCTAVES },
+                uGain:       { value: GAIN },
+                uLacunarity: { value: 2.0 },
+                uNormFactor: { value: 1.0 },
+                t:           { value: 0.0 }
             },
             vertexShader: blurVert,
-            fragmentShader: fbmFrag,
+            fragmentShader: fbmFrag2,
             depthTest: false,
             depthWrite: false,
         }),
@@ -177,10 +173,7 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
         if (!brush || !group) return
 
         const elapsed = state.clock.getElapsedTime();
-        fbmMat.uniforms.t.value = elapsed * 10; // or scale it if needed
-
-        // update camera-based uniform every frame (OrbitControls modifies state.camera)
-        fbmMat.uniforms.uCameraPos.value.copy(state.camera.position);
+        fbmMat.uniforms.t.value = elapsed * 10;
 
         let hadGeometry = false
         brush.updateWorldMatrix(true, false)
