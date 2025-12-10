@@ -292,8 +292,6 @@ export const fbmFrag = /* glsl */`
         //Add
         float add_result = subtract + 0.717 * colorRamp3(FMB_noise.r) * color_input.r;
 
-
-
         // Caustics Distortion
         float caustics_distortion_timeFactor = mod(t, 300.0) / 180.0;
         vec3 caustics_distortion_mapping = vec3(caustics_distortion_timeFactor, 0., 0.) + formatted_UV;
@@ -315,9 +313,6 @@ export const fbmFrag = /* glsl */`
         float caustics_shape_color_ramp = colorRamp2(caustics_shape_subtract);
         vec3 blue2 = vec3(0.24824, 0.8, 0.8);
         vec3 caustics_shape_output = mix(vec3(0.), blue2, caustics_shape_subtract);
-
-
-
 
         // --- EMISSION BASED ON MASK / RAMP ---
         vec3 blue = vec3(0.454, 0.893, 1.0);

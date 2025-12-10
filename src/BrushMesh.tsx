@@ -18,7 +18,8 @@ const BrushMesh = forwardRef<THREE.Mesh, Props>(({ groupRef }, ref) => {
         position={[0, 0, 0]} 
         castShadow 
         geometry={nodes.duck.geometry}
-        scale={[2, 2, 2]}
+        // scale={[2, 2, 2]}
+        scale={[.1, .1, .1]}
       >
         <meshStandardMaterial
           color="#ffffff"

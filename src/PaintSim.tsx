@@ -81,11 +81,11 @@ export default function PaintSim({ planeSize, brushRef, outTextureRef, groupRef 
                 vec3 maskSample = texture2D(uMask, vUv).rgb;
 
                 // plain paint contribution
-                // vec3 paint = vec3(1.0) * (maskSample * uWet);
+                vec3 paint = vec3(1.0) * (maskSample * uWet);
 
                 // outc = your “wet paint buffer” result
-                // vec3 outc = mix(prev, paint, uAbs * maskSample * uAlpha) +
-                //             (1.0 - uAbs) * paint * uAlpha;
+                vec3 outc = mix(prev, paint, uAbs * maskSample * uAlpha) +
+                            (1.0 - uAbs) * paint * uAlpha;
 
                 gl_FragColor = vec4(maskSample, 1.0);
             }
